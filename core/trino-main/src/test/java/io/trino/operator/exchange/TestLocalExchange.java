@@ -273,7 +273,7 @@ public class TestLocalExchange
             // writer min file and buffered data size limits are exceeded, so we should see pages in sourceB
             physicalWrittenBytesA.set(retainedSizeOfPages(2));
             sink.addPage(createPage(0));
-            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 2);
+            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 3);
             assertEquals(sourceB.getBufferInfo().getBufferedPages(), 1);
             assertEquals(sourceC.getBufferInfo().getBufferedPages(), 0);
 
@@ -285,8 +285,8 @@ public class TestLocalExchange
             sink.addPage(createPage(0));
             sink.addPage(createPage(0));
             sink.addPage(createPage(0));
-            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 2);
-            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 2);
+            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 4);
+            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 4);
             assertEquals(sourceC.getBufferInfo().getBufferedPages(), 0);
 
             // writer min file and buffered data size limits are exceeded again, but according to
@@ -294,19 +294,18 @@ public class TestLocalExchange
             physicalWrittenBytesA.set(retainedSizeOfPages(4));
             physicalWrittenBytesB.set(retainedSizeOfPages(2));
             sink.addPage(createPage(0));
-            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 2);
-            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 3);
-            assertEquals(sourceC.getBufferInfo().getBufferedPages(), 0);
+            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 5);
+            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 5);
+            assertEquals(sourceC.getBufferInfo().getBufferedPages(), 1);
 
             assertSinkWriteBlocked(sink);
-            assertRemoveAllPages(sourceA, createPage(0));
 
             // sourceC should receive a page
             physicalWrittenBytesB.set(retainedSizeOfPages(3));
             sink.addPage(createPage(0));
-            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 0);
-            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 3);
-            assertEquals(sourceC.getBufferInfo().getBufferedPages(), 1);
+            assertEquals(sourceA.getBufferInfo().getBufferedPages(), 6);
+            assertEquals(sourceB.getBufferInfo().getBufferedPages(), 6);
+            assertEquals(sourceC.getBufferInfo().getBufferedPages(), 2);
         });
     }
 

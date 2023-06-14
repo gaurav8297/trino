@@ -24,6 +24,7 @@ import io.trino.operator.HashGenerator;
 import io.trino.operator.InterpretedHashGenerator;
 import io.trino.operator.PartitionFunction;
 import io.trino.operator.PrecomputedHashGenerator;
+import io.trino.operator.output.SkewedPartitionRebalancer;
 import io.trino.spi.Page;
 import io.trino.spi.type.Type;
 import io.trino.sql.planner.MergePartitioningHandle;
@@ -146,14 +147,11 @@ public class LocalExchange
         }
         else if (isScaledWriterHashDistribution(partitioning)) {
             int partitionCount = bufferCount * SCALE_WRITERS_MAX_PARTITIONS_PER_WRITER;
-            List<Supplier<Long2LongMap>> writerPartitionRowCountsSuppliers = new CopyOnWriteArrayList<>();
-            UniformPartitionRebalancer uniformPartitionRebalancer = new UniformPartitionRebalancer(
-                    physicalWrittenBytesSuppliers,
-                    () -> computeAggregatedPartitionRowCounts(writerPartitionRowCountsSuppliers),
+            SkewedPartitionRebalancer skewedPartitionRebalancer = new SkewedPartitionRebalancer(
                     partitionCount,
                     bufferCount,
+                    8,
                     writerMinSize.toBytes());
-
             LocalExchangeMemoryManager memoryManager = new LocalExchangeMemoryManager(maxBufferedBytes.toBytes());
             sources = IntStream.range(0, bufferCount)
                     .mapToObj(i -> new LocalExchangeSource(memoryManager, source -> checkAllSourcesFinished()))
@@ -176,8 +174,7 @@ public class LocalExchange
                         createPartitionPagePreparer(partitioning, partitionChannels),
                         partitionFunction,
                         partitionCount,
-                        uniformPartitionRebalancer);
-                writerPartitionRowCountsSuppliers.add(exchanger::getAndResetPartitionRowCounts);
+                        skewedPartitionRebalancer);
                 return exchanger;
             };
         }

@@ -166,7 +166,7 @@ public class SkewedPartitionRebalancer
         return IntStream.of(bucketToPartition).max().getAsInt() + 1;
     }
 
-    private SkewedPartitionRebalancer(
+    public SkewedPartitionRebalancer(
             int partitionCount,
             int taskCount,
             int taskBucketCount,
@@ -412,7 +412,7 @@ public class SkewedPartitionRebalancer
             minTasks.addOrUpdate(taskBucket, Long.MAX_VALUE - estimatedTaskBucketDataSizeSinceLastRebalance[taskBucket.id]);
         }
 
-        log.debug("Rebalanced partition %s to task %s with taskCount %s", partitionId, toTaskBucket.taskId, assignments.size());
+        log.warn("Rebalanced partition %s to task %s with taskCount %s", partitionId, toTaskBucket.taskId, assignments.size());
         return true;
     }
 

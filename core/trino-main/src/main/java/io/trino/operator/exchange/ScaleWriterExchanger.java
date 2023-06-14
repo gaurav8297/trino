@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
 import io.trino.spi.Page;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -39,11 +40,11 @@ public class ScaleWriterExchanger
     private final long maxBufferedBytes;
     private final Supplier<Long> physicalWrittenBytesSupplier;
     private final long writerMinSize;
+    private final IntArrayList[] writerAssignments;
 
     // Start with single writer and increase the writer count based on
     // physical written bytes and buffer utilization.
     private int writerCount = 1;
-    private long lastScaleUpPhysicalWrittenBytes;
     private int nextWriterIndex = -1;
 
     public ScaleWriterExchanger(
@@ -58,34 +59,52 @@ public class ScaleWriterExchanger
         this.maxBufferedBytes = maxBufferedBytes;
         this.physicalWrittenBytesSupplier = requireNonNull(physicalWrittenBytesSupplier, "physicalWrittenBytesSupplier is null");
         this.writerMinSize = writerMinSize.toBytes();
+
+        // Initialize writerAssignments with the buffer size
+        writerAssignments = new IntArrayList[buffers.size()];
+        for (int i = 0; i < writerAssignments.length; i++) {
+            writerAssignments[i] = new IntArrayList();
+        }
     }
 
     @Override
     public void accept(Page page)
     {
-        Consumer<Page> buffer = buffers.get(getNextWriterIndex());
-        memoryManager.updateMemoryUsage(page.getRetainedSizeInBytes());
-        buffer.accept(page);
-    }
-
-    private int getNextWriterIndex()
-    {
+        int maxWriterCount = buffers.size();
         // Scale up writers when current buffer memory utilization is more than 50% of the
-        // maximum and physical written bytes by the last scaled up writer is greater than
-        // writerMinSize.
+        // maximum and physical written bytes is greater than (writerCount * writerMinSize).
         // This also mean that we won't scale local writers if the writing speed can cope up
         // with incoming data. In another word, buffer utilization is below 50%.
-        if (writerCount < buffers.size() && memoryManager.getBufferedBytes() >= maxBufferedBytes / 2) {
-            long physicalWrittenBytes = physicalWrittenBytesSupplier.get();
-            if ((physicalWrittenBytes - lastScaleUpPhysicalWrittenBytes) >= writerCount * writerMinSize) {
-                lastScaleUpPhysicalWrittenBytes = physicalWrittenBytes;
+        if (writerCount < maxWriterCount && memoryManager.getBufferedBytes() >= maxBufferedBytes / 2) {
+            if (physicalWrittenBytesSupplier.get() >= writerCount * writerMinSize) {
                 writerCount++;
-                log.debug("Increased task writer count: %d", writerCount);
+                log.warn("Increased task writer count: %d", writerCount);
             }
         }
 
-        nextWriterIndex = (nextWriterIndex + 1) % writerCount;
-        return nextWriterIndex;
+        for (int position = 0; position < page.getPositionCount(); position++) {
+            nextWriterIndex = (nextWriterIndex + 1) % writerCount;
+            writerAssignments[nextWriterIndex].add(position);
+        }
+
+        for (int bucket = 0; bucket < writerAssignments.length; bucket++) {
+            IntArrayList positionsList = writerAssignments[bucket];
+            int bucketSize = positionsList.size();
+            if (bucketSize == 0) {
+                continue;
+            }
+            int[] positions = positionsList.elements();
+            positionsList.clear();
+
+            Page pageSplit = page.copyPositions(positions, 0, bucketSize);
+            sendPageToPartition(buffers.get(bucket), pageSplit);
+        }
+    }
+
+    private void sendPageToPartition(Consumer<Page> buffer, Page pageSplit)
+    {
+        memoryManager.updateMemoryUsage(pageSplit.getRetainedSizeInBytes());
+        buffer.accept(pageSplit);
     }
 
     @Override

@@ -278,6 +278,7 @@ public class TestLeastWastedEffortTaskLowMemoryKiller
                         DataSize.of(1, DataSize.Unit.MEGABYTE),
                         DataSize.of(1, DataSize.Unit.MEGABYTE),
                         DataSize.of(0, DataSize.Unit.MEGABYTE),
+                        DataSize.of(1, DataSize.Unit.MEGABYTE),
                         0,
                         Duration.valueOf("0s"),
                         0,

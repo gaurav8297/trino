@@ -290,6 +290,7 @@ public class MockRemoteTaskFactory
                     stats.getUserMemoryReservation(),
                     stats.getPeakUserMemoryReservation(),
                     stats.getRevocableMemoryReservation(),
+                    DataSize.ofBytes(1),
                     0,
                     new Duration(0, MILLISECONDS),
                     INITIAL_DYNAMIC_FILTERS_VERSION,

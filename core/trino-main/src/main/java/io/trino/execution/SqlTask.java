@@ -328,6 +328,7 @@ public class SqlTask
         DataSize userMemoryReservation = DataSize.ofBytes(0);
         DataSize peakUserMemoryReservation = DataSize.ofBytes(0);
         DataSize revocableMemoryReservation = DataSize.ofBytes(0);
+        DataSize queryMemoryReservation = DataSize.ofBytes(0);
         long fullGcCount = 0;
         Duration fullGcTime = new Duration(0, MILLISECONDS);
         long dynamicFiltersVersion = INITIAL_DYNAMIC_FILTERS_VERSION;
@@ -366,6 +367,7 @@ public class SqlTask
             userMemoryReservation = taskContext.getMemoryReservation();
             peakUserMemoryReservation = taskContext.getPeakMemoryReservation();
             revocableMemoryReservation = taskContext.getRevocableMemoryReservation();
+            queryMemoryReservation = taskContext.getQueryMemoryReservation();
             outputDataSize = DataSize.ofBytes(taskContext.getOutputDataSize().getTotalCount());
             fullGcCount = taskContext.getFullGcCount();
             fullGcTime = taskContext.getFullGcTime();
@@ -391,6 +393,7 @@ public class SqlTask
                 userMemoryReservation,
                 peakUserMemoryReservation,
                 revocableMemoryReservation,
+                queryMemoryReservation,
                 fullGcCount,
                 fullGcTime,
                 dynamicFiltersVersion,

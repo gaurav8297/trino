@@ -885,6 +885,7 @@ public class TestHttpRemoteTask
                     initialTaskStatus.getMemoryReservation(),
                     initialTaskStatus.getPeakMemoryReservation(),
                     initialTaskStatus.getRevocableMemoryReservation(),
+                    initialTaskStatus.getQueryMemoryReservation(),
                     initialTaskStatus.getFullGcCount(),
                     initialTaskStatus.getFullGcTime(),
                     dynamicFilterDomains.map(VersionedDynamicFilterDomains::getVersion).orElse(INITIAL_DYNAMIC_FILTERS_VERSION),

@@ -298,9 +298,11 @@ import static com.google.common.collect.Range.closedOpen;
 import static com.google.common.collect.Sets.difference;
 import static io.trino.SystemSessionProperties.getAdaptivePartialAggregationUniqueRowsRatioThreshold;
 import static io.trino.SystemSessionProperties.getAggregationOperatorUnspillMemoryLimit;
+import static io.trino.SystemSessionProperties.getApproxMemoryPerPartition;
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageRowCount;
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageSize;
 import static io.trino.SystemSessionProperties.getPagePartitioningBufferPoolSize;
+import static io.trino.SystemSessionProperties.getQueryMaxMemoryPerNode;
 import static io.trino.SystemSessionProperties.getSkewedPartitionMinDataProcessedRebalanceThreshold;
 import static io.trino.SystemSessionProperties.getTaskConcurrency;
 import static io.trino.SystemSessionProperties.getTaskPartitionedWriterCount;
@@ -335,6 +337,7 @@ import static io.trino.operator.join.NestedLoopJoinOperator.NestedLoopJoinOperat
 import static io.trino.operator.output.SkewedPartitionRebalancer.checkCanScalePartitionsRemotely;
 import static io.trino.operator.output.SkewedPartitionRebalancer.createPartitionFunction;
 import static io.trino.operator.output.SkewedPartitionRebalancer.createSkewedPartitionRebalancer;
+import static io.trino.operator.output.SkewedPartitionRebalancer.getMaxPartitionsPerTaskBasedOnMemory;
 import static io.trino.operator.output.SkewedPartitionRebalancer.getTaskCount;
 import static io.trino.operator.window.pattern.PhysicalValuePointer.CLASSIFIER;
 import static io.trino.operator.window.pattern.PhysicalValuePointer.MATCH_NUMBER;
@@ -584,8 +587,10 @@ public class LocalExecutionPlanner
                     partitionFunction.getPartitionCount(),
                     taskCount,
                     getTaskPartitionedWriterCount(taskContext.getSession()),
-                    getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes(),
-                    getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes()));
+                    getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes() * 16,
+                    getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes(),
+                    getQueryMaxMemoryPerNode(taskContext.getSession()).toBytes(),
+                    getApproxMemoryPerPartition(taskContext.getSession()).toBytes()));
         }
         else {
             partitionFunction = nodePartitioningManager.getPartitionFunction(taskContext.getSession(), partitioningScheme, partitionChannelTypes);
@@ -3489,25 +3494,39 @@ public class LocalExecutionPlanner
             if (isSingleGatheringExchange(source)) {
                 return 1;
             }
-
+            int maxWritersBasedOnMemory = getMaxPartitionsPerTaskBasedOnMemory(
+                    getQueryMaxMemoryPerNode(session).toBytes(),
+                    getApproxMemoryPerPartition(session).toBytes());
             if (partitioningScheme.isPresent()) {
                 // The default value of partitioned writer count is 32 which is high enough to use it
                 // for both cases when scaling is enabled or not. Additionally, it doesn't lead to too many
                 // small files since when scaling is disabled only single writer will handle a single partition.
+                int partitionedWriterCount = getTaskPartitionedWriterCount(session);
                 if (isLocalScaledWriterExchange(source)) {
-                    return connectorScalingOptions.perTaskMaxScaledWriterCount()
+                    partitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                             .map(writerCount -> min(writerCount, getTaskPartitionedWriterCount(session)))
                             .orElse(getTaskPartitionedWriterCount(session));
                 }
-                return getTaskPartitionedWriterCount(session);
+                // Limit the number of writers based on the possible number of partitions per task calculated
+                // using max memory per node.
+                return partitionedWriterCount;
             }
 
+            int unPartitionedWriterCount = getTaskWriterCount(session);
+
             if (isLocalScaledWriterExchange(source)) {
-                return connectorScalingOptions.perTaskMaxScaledWriterCount()
+                unPartitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                         .map(writerCount -> min(writerCount, getTaskScaleWritersMaxWriterCount(session)))
                         .orElse(getTaskScaleWritersMaxWriterCount(session));
             }
-            return getTaskWriterCount(session);
+            // Limit the number of writers based on the possible number of writers per task calculated
+            // using max memory per node.
+            return min(unPartitionedWriterCount, maxWritersBasedOnMemory);
+        }
+
+        public int previousPowerOfTwo(int x)
+        {
+            return 1 << 31 - Integer.numberOfLeadingZeros(x);
         }
 
         private boolean isSingleGatheringExchange(PlanNode node)
@@ -3651,7 +3670,9 @@ public class LocalExecutionPlanner
                     Optional.empty(),
                     maxLocalExchangeBufferSize,
                     typeOperators,
-                    getWriterScalingMinDataProcessed(session));
+                    getWriterScalingMinDataProcessed(session),
+                    getMaxPartitionsPerTaskBasedOnMemory(getQueryMaxMemoryPerNode(session).toBytes(), getApproxMemoryPerPartition(session).toBytes()),
+                    () -> context.getTaskContext().getQueryMemoryReservation().toBytes());
 
             List<Symbol> expectedLayout = node.getInputs().get(0);
             Function<Page, Page> pagePreprocessor = enforceLoadedLayoutProcessor(expectedLayout, source.getLayout());
@@ -3727,7 +3748,9 @@ public class LocalExecutionPlanner
                     hashChannel,
                     maxLocalExchangeBufferSize,
                     typeOperators,
-                    getWriterScalingMinDataProcessed(session));
+                    getWriterScalingMinDataProcessed(session),
+                    getMaxPartitionsPerTaskBasedOnMemory(getQueryMaxMemoryPerNode(session).toBytes(), getApproxMemoryPerPartition(session).toBytes()),
+                    () -> context.getTaskContext().getQueryMemoryReservation().toBytes());
             for (int i = 0; i < node.getSources().size(); i++) {
                 DriverFactoryParameters driverFactoryParameters = driverFactoryParametersList.get(i);
                 PhysicalOperation source = driverFactoryParameters.getSource();

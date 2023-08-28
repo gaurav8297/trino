@@ -209,6 +209,8 @@ public final class SystemSessionProperties
     public static final String FORCE_SPILLING_JOIN = "force_spilling_join";
     public static final String PAGE_PARTITIONING_BUFFER_POOL_SIZE = "page_partitioning_buffer_pool_size";
     public static final String FLAT_GROUP_BY_HASH = "flat_group_by_hash";
+    public static final String APPROX_MEMORY_PER_PARTITION = "approx_memory_per_partition";
+    public static final String SCALE_WRITERS_MAX_MEMORY_RATIO = "scale_writers_max_memory_ratio";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -345,7 +347,7 @@ public final class SystemSessionProperties
                 dataSizeProperty(
                         SKEWED_PARTITION_MIN_DATA_PROCESSED_REBALANCE_THRESHOLD,
                         "Minimum data processed to trigger skewed partition rebalancing in local and remote exchange",
-                        DataSize.of(50, MEGABYTE),
+                        DataSize.of(200, MEGABYTE),
                         true),
                 booleanProperty(
                         PUSH_TABLE_WRITE_THROUGH_UNION,
@@ -1070,7 +1072,17 @@ public final class SystemSessionProperties
                         FLAT_GROUP_BY_HASH,
                         "Enable new flat group by hash",
                         featuresConfig.isFlatGroupByHash(),
-                        true));
+                        true),
+                dataSizeProperty(
+                        APPROX_MEMORY_PER_PARTITION,
+                        "Enable new flat group by hash",
+                        DataSize.of(64, MEGABYTE),
+                        false),
+                doubleProperty(
+                        SCALE_WRITERS_MAX_MEMORY_RATIO,
+                        "Enable new flat group by hash",
+                        0.5,
+                        false));
     }
 
     @Override
@@ -1917,5 +1929,15 @@ public final class SystemSessionProperties
     public static boolean isFlatGroupByHash(Session session)
     {
         return session.getSystemProperty(FLAT_GROUP_BY_HASH, Boolean.class);
+    }
+
+    public static DataSize getApproxMemoryPerPartition(Session session)
+    {
+        return session.getSystemProperty(APPROX_MEMORY_PER_PARTITION, DataSize.class);
+    }
+
+    public static double getScaleWritersMaxMemoryRatio(Session session)
+    {
+        return session.getSystemProperty(SCALE_WRITERS_MAX_MEMORY_RATIO, Double.class);
     }
 }

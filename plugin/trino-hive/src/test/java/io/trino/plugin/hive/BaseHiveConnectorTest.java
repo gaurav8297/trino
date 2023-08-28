@@ -4112,6 +4112,34 @@ public abstract class BaseHiveConnectorTest
     }
 
     @Test
+    public void testMultipleWritersWhenMaxMemoryPerNodeLimitReached()
+    {
+        try {
+            // We need to use large table (sf2) to see the effect. Otherwise, a single writer will write the entire
+            // data before ScaledWriterScheduler is able to scale it to multiple machines.
+            @Language("SQL") String createTableSql = "CREATE TABLE scale_writers_large WITH (format = 'PARQUET') AS " +
+                    "SELECT * FROM tpch.sf2.orders";
+            assertUpdate(
+                    Session.builder(getSession())
+                            .setSystemProperty("task_writer_count", "1")
+                            .setSystemProperty("scale_writers", "true")
+                            .setSystemProperty("task_scale_writers_enabled", "false")
+                            .setSystemProperty("writer_scaling_min_data_processed", "10GB")
+                            .setSystemProperty("query_max_memory_per_node", "120MB")
+                            .build(),
+                    createTableSql,
+                    (long) computeActual("SELECT count(*) FROM tpch.sf2.orders").getOnlyValue());
+
+            long files = (long) computeScalar("SELECT count(DISTINCT \"$path\") FROM scale_writers_large");
+            long workers = (long) computeScalar("SELECT count(*) FROM system.runtime.nodes");
+            assertThat(files).isBetween(2L, workers);
+        }
+        finally {
+            assertUpdate("DROP TABLE IF EXISTS scale_writers_large");
+        }
+    }
+
+    @Test
     public void testMultipleWritersWhenTaskScaleWritersIsEnabled()
     {
         long workers = (long) computeScalar("SELECT count(*) FROM system.runtime.nodes");

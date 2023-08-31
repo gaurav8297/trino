@@ -152,7 +152,9 @@ public final class JoinTestUtils
                 buildPages.getHashChannel(),
                 DataSize.of(32, DataSize.Unit.MEGABYTE),
                 TYPE_OPERATORS,
-                DataSize.of(32, DataSize.Unit.MEGABYTE));
+                DataSize.of(32, DataSize.Unit.MEGABYTE),
+                100,
+                () -> 0L);
 
         // collect input data into the partitioned exchange
         DriverContext collectDriverContext = taskContext.addPipelineContext(0, true, true, false).addDriverContext();

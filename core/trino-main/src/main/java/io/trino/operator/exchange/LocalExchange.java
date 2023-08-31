@@ -49,6 +49,7 @@ import java.util.stream.IntStream;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.trino.SystemSessionProperties.getQueryMaxMemoryPerNode;
 import static io.trino.SystemSessionProperties.getSkewedPartitionMinDataProcessedRebalanceThreshold;
 import static io.trino.operator.InterpretedHashGenerator.createChannelsHashGenerator;
 import static io.trino.operator.exchange.LocalExchangeSink.finishedLocalExchangeSink;
@@ -59,6 +60,7 @@ import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUT
 import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_PASSTHROUGH_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.SCALED_WRITER_ROUND_ROBIN_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
+import static java.lang.Math.round;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 
@@ -66,6 +68,10 @@ import static java.util.function.Function.identity;
 public class LocalExchange
 {
     private static final int SCALE_WRITERS_MAX_PARTITIONS_PER_WRITER = 128;
+    // This represents the percentage of maxMemoryPerNode upon which we will stop scaling of writers locally. We have
+    // to be conservative here otherwise scaling of writers will happen first before we hit this limit, and then
+    // we won't be able to do anything to stop OOM error.
+    public static final double SCALE_WRITERS_MAX_MEMORY_RATIO = 0.5;
 
     private final Supplier<LocalExchanger> exchangerSupplier;
 
@@ -96,7 +102,9 @@ public class LocalExchange
             Optional<Integer> partitionHashChannel,
             DataSize maxBufferedBytes,
             TypeOperators typeOperators,
-            DataSize writerScalingMinDataProcessed)
+            DataSize writerScalingMinDataProcessed,
+            int maxWriterPartitionsBasedOnMemory,
+            Supplier<Long> totalMemoryUsed)
     {
         int bufferCount = computeBufferCount(partitioning, defaultConcurrency, partitionChannels);
 
@@ -132,7 +140,9 @@ public class LocalExchange
                     memoryManager,
                     maxBufferedBytes.toBytes(),
                     dataProcessed,
-                    writerScalingMinDataProcessed);
+                    writerScalingMinDataProcessed,
+                    totalMemoryUsed,
+                    (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO));
         }
         else if (isScaledWriterHashDistribution(partitioning)) {
             int partitionCount = bufferCount * SCALE_WRITERS_MAX_PARTITIONS_PER_WRITER;
@@ -141,7 +151,10 @@ public class LocalExchange
                     bufferCount,
                     1,
                     writerScalingMinDataProcessed.toBytes(),
-                    getSkewedPartitionMinDataProcessedRebalanceThreshold(session).toBytes());
+                    getSkewedPartitionMinDataProcessedRebalanceThreshold(session).toBytes(),
+                    // Further divide the maximum number of possible partition writers based on memory into
+                    // the number of available writer threads.
+                    (int) round((double) maxWriterPartitionsBasedOnMemory / bufferCount));
             LocalExchangeMemoryManager memoryManager = new LocalExchangeMemoryManager(maxBufferedBytes.toBytes());
             sources = IntStream.range(0, bufferCount)
                     .mapToObj(i -> new LocalExchangeSource(memoryManager, source -> checkAllSourcesFinished()))
@@ -164,7 +177,9 @@ public class LocalExchange
                         createPartitionPagePreparer(partitioning, partitionChannels),
                         partitionFunction,
                         partitionCount,
-                        skewedPartitionRebalancer);
+                        skewedPartitionRebalancer,
+                        totalMemoryUsed,
+                        (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO));
             };
         }
         else if (partitioning.equals(FIXED_HASH_DISTRIBUTION) || partitioning.getCatalogHandle().isPresent() ||

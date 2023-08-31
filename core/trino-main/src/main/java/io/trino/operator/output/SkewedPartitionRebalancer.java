@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.errorprone.annotations.ThreadSafe;
 import com.google.errorprone.annotations.concurrent.GuardedBy;
 import io.airlift.log.Logger;
+import io.airlift.units.DataSize;
 import io.trino.Session;
 import io.trino.execution.resourcegroups.IndexedPriorityQueue;
 import io.trino.operator.PartitionFunction;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.stream.IntStream;
@@ -77,16 +79,21 @@ public class SkewedPartitionRebalancer
     // If the percentage difference between the two different task buckets with maximum and minimum processed bytes
     // since last rebalance is above 0.7 (or 70%), then we consider them skewed.
     private static final double TASK_BUCKET_SKEWNESS_THRESHOLD = 0.7;
+    // Estimated memory required per partition in a single writer thread. We will use this to estimate the
+    // number of possible partitions per task.
+    private static final long MAX_MEMORY_PER_PARTITION = DataSize.of(128, DataSize.Unit.MEGABYTE).toBytes();
 
     private final int partitionCount;
     private final int taskCount;
     private final int taskBucketCount;
     private final long minPartitionDataProcessedRebalanceThreshold;
     private final long minDataProcessedRebalanceThreshold;
+    private final int maxPartitionsPerTask;
 
     private final AtomicLongArray partitionRowCount;
     private final AtomicLong dataProcessed;
     private final AtomicLong dataProcessedAtLastRebalance;
+    private final AtomicIntegerArray numOfPartitionsPerTask;
 
     @GuardedBy("this")
     private final long[] partitionDataSize;
@@ -153,11 +160,23 @@ public class SkewedPartitionRebalancer
             int taskCount,
             int taskPartitionedWriterCount,
             long minPartitionDataProcessedRebalanceThreshold,
-            long maxDataProcessedRebalanceThreshold)
+            long maxDataProcessedRebalanceThreshold,
+            long maxMemoryPerTask)
     {
         // Keep the task bucket count to 50% of total local writers
         int taskBucketCount = (int) ceil(0.5 * taskPartitionedWriterCount);
-        return new SkewedPartitionRebalancer(partitionCount, taskCount, taskBucketCount, minPartitionDataProcessedRebalanceThreshold, maxDataProcessedRebalanceThreshold);
+        return new SkewedPartitionRebalancer(
+                partitionCount,
+                taskCount,
+                taskBucketCount,
+                minPartitionDataProcessedRebalanceThreshold,
+                maxDataProcessedRebalanceThreshold,
+                getMaxPartitionsPerTaskBasedOnMemory(maxMemoryPerTask));
+    }
+
+    public static int getMaxPartitionsPerTaskBasedOnMemory(long maxMemoryPerTask)
+    {
+        return (int) ceil((double) maxMemoryPerTask / MAX_MEMORY_PER_PARTITION);
     }
 
     public static int getTaskCount(PartitioningScheme partitioningScheme)
@@ -175,17 +194,21 @@ public class SkewedPartitionRebalancer
             int taskCount,
             int taskBucketCount,
             long minPartitionDataProcessedRebalanceThreshold,
-            long maxDataProcessedRebalanceThreshold)
+            long maxDataProcessedRebalanceThreshold,
+            int maxPartitionsPerTask)
     {
         this.partitionCount = partitionCount;
         this.taskCount = taskCount;
         this.taskBucketCount = taskBucketCount;
         this.minPartitionDataProcessedRebalanceThreshold = minPartitionDataProcessedRebalanceThreshold;
         this.minDataProcessedRebalanceThreshold = max(minPartitionDataProcessedRebalanceThreshold, maxDataProcessedRebalanceThreshold);
+        this.maxPartitionsPerTask = maxPartitionsPerTask;
+        log.warn("Max partitions per task is set to %s", maxPartitionsPerTask);
 
         this.partitionRowCount = new AtomicLongArray(partitionCount);
         this.dataProcessed = new AtomicLong();
         this.dataProcessedAtLastRebalance = new AtomicLong();
+        this.numOfPartitionsPerTask = new AtomicIntegerArray(taskCount);
 
         this.partitionDataSize = new long[partitionCount];
         this.partitionDataSizeAtLastRebalance = new long[partitionCount];
@@ -247,7 +270,17 @@ public class SkewedPartitionRebalancer
     private boolean shouldRebalance(long dataProcessed)
     {
         // Rebalance only when total bytes processed since last rebalance is greater than rebalance threshold
-        return (dataProcessed - dataProcessedAtLastRebalance.get()) >= minDataProcessedRebalanceThreshold;
+        if ((dataProcessed - dataProcessedAtLastRebalance.get()) < minDataProcessedRebalanceThreshold) {
+            return false;
+        }
+
+        // Check if number of partitions per task does not exceed maxPartitionsPerTask
+        for (int taskId = 0; taskId < taskCount; taskId++) {
+            if (numOfPartitionsPerTask.get(taskId) < maxPartitionsPerTask) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private synchronized void rebalancePartitions(long dataProcessed)
@@ -257,6 +290,11 @@ public class SkewedPartitionRebalancer
         }
 
         calculatePartitionDataSize(dataProcessed);
+
+        // reset numOfPartitionsPerTask
+        for (int taskId = 0; taskId < taskCount; taskId++) {
+            numOfPartitionsPerTask.set(taskId, 0);
+        }
 
         // initialize partitionDataSizeSinceLastRebalancePerTask
         for (int partition = 0; partition < partitionCount; partition++) {
@@ -278,6 +316,11 @@ public class SkewedPartitionRebalancer
             for (TaskBucket taskBucket : taskAssignments) {
                 IndexedPriorityQueue<Integer> queue = taskBucketMaxPartitions.get(taskBucket.id);
                 queue.addOrUpdate(partition, partitionDataSizeSinceLastRebalancePerTask[partition]);
+
+                // Increment numOfPartitionsPerTask if partition has rows
+                if (partitionRowCount.get(partition) > 0) {
+                    numOfPartitionsPerTask.incrementAndGet(taskBucket.taskId);
+                }
             }
         }
 
@@ -401,6 +444,13 @@ public class SkewedPartitionRebalancer
         if (assignments.stream().anyMatch(taskBucket -> taskBucket.taskId == toTaskBucket.taskId)) {
             return false;
         }
+
+        // If maxPartitionsPerTask is set, check if the number of partitions assigned to the task is less than
+        // maxPartitionsPerTask. If not, do not scale the partition to the task.
+        if (numOfPartitionsPerTask.get(toTaskBucket.taskId) >= maxPartitionsPerTask) {
+            return false;
+        }
+
         assignments.add(toTaskBucket);
 
         // Update the value of partitionDataSizeAtLastRebalance which will get used to calculate
@@ -425,6 +475,8 @@ public class SkewedPartitionRebalancer
             minTasks.addOrUpdate(taskBucket, Long.MAX_VALUE - estimatedTaskBucketDataSizeSinceLastRebalance[taskBucket.id]);
         }
 
+        // Increment the number of partitions assigned to the task.
+        numOfPartitionsPerTask.incrementAndGet(toTaskBucket.taskId);
         log.warn("Rebalanced partition %s to task %s with taskCount %s", partitionId, toTaskBucket.taskId, assignments.size());
         return true;
     }

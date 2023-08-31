@@ -22,6 +22,7 @@ import io.trino.spi.Page;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static java.util.Objects.requireNonNull;
 
@@ -39,6 +40,8 @@ public class ScaleWriterExchanger
     private final long maxBufferedBytes;
     private final AtomicLong dataProcessed;
     private final long writerScalingMinDataProcessed;
+    private final Supplier<Long> totalMemoryUsed;
+    private final long maxMemoryThreshold;
 
     // Start with single writer and increase the writer count based on
     // data processed by writers and buffer utilization.
@@ -50,13 +53,17 @@ public class ScaleWriterExchanger
             LocalExchangeMemoryManager memoryManager,
             long maxBufferedBytes,
             AtomicLong dataProcessed,
-            DataSize writerScalingMinDataProcessed)
+            DataSize writerScalingMinDataProcessed,
+            Supplier<Long> totalMemoryUsed,
+            long maxMemoryThreshold)
     {
         this.buffers = requireNonNull(buffers, "buffers is null");
         this.memoryManager = requireNonNull(memoryManager, "memoryManager is null");
         this.maxBufferedBytes = maxBufferedBytes;
         this.dataProcessed = requireNonNull(dataProcessed, "dataProcessed is null");
         this.writerScalingMinDataProcessed = writerScalingMinDataProcessed.toBytes();
+        this.totalMemoryUsed = requireNonNull(totalMemoryUsed, "totalMemoryUsed is null");
+        this.maxMemoryThreshold = maxMemoryThreshold;
     }
 
     @Override
@@ -75,9 +82,11 @@ public class ScaleWriterExchanger
         // This also mean that we won't scale local writers if the writing speed can cope up
         // with incoming data. In another word, buffer utilization is below 50%.
         if (writerCount < buffers.size() && memoryManager.getBufferedBytes() >= maxBufferedBytes / 2) {
-            if (dataProcessed.get() >= writerCount * writerScalingMinDataProcessed) {
+            if (dataProcessed.get() >= writerCount * writerScalingMinDataProcessed
+                    // Do not scale up if total memory used is greater than maxMemoryThreshold
+                    && totalMemoryUsed.get() < maxMemoryThreshold) {
                 writerCount++;
-                log.debug("Increased task writer count: %d", writerCount);
+                log.warn("Increased task writer count: %d", writerCount);
             }
         }
 

@@ -62,6 +62,12 @@ public class TestHiveFaultTolerantExecutionConnectorTest
         // Not applicable for fault-tolerant mode.
     }
 
+    @Override
+    public void testMultipleWritersWhenMaxMemoryPerNodeLimitReached()
+    {
+        // Not applicable for fault-tolerant mode.
+    }
+
     // We need to override this method because in the case of pipeline execution,
     // the default number of writers are equal to worker count. Whereas, in the
     // fault-tolerant execution, it starts with 1.

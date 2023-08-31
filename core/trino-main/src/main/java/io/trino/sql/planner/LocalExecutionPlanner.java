@@ -580,11 +580,16 @@ public class LocalExecutionPlanner
         int taskCount = getTaskCount(partitioningScheme);
         if (checkCanScalePartitionsRemotely(taskContext.getSession(), taskCount, partitioningScheme.getPartitioning().getHandle(), nodePartitioningManager)) {
             partitionFunction = createPartitionFunction(taskContext.getSession(), nodePartitioningManager, partitioningScheme, partitionChannelTypes);
+            int partitionedWriterCount = getTaskPartitionedWriterCount(taskContext.getSession());
             skewedPartitionRebalancer = Optional.of(createSkewedPartitionRebalancer(
                     partitionFunction.getPartitionCount(),
                     taskCount,
-                    getTaskPartitionedWriterCount(taskContext.getSession()),
-                    getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes(),
+                    partitionedWriterCount,
+                    // Set the value of minPartitionDataProcessedRebalanceThreshold higher than local exchange
+                    // such that we don't spread partitions across tasks too aggressively. This way we give a partition
+                    // an enough time to first scale locally. The value of 0.25 means that a skewed partition is atleast
+                    // scaled to 25% of available writers.
+                    (long) (getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes() * partitionedWriterCount * 0.25),
                     getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes()));
         }
         else {

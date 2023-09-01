@@ -60,7 +60,7 @@ import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUT
 import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_PASSTHROUGH_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.SCALED_WRITER_ROUND_ROBIN_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.SINGLE_DISTRIBUTION;
-import static java.lang.Math.round;
+import static java.lang.Math.floor;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 
@@ -71,7 +71,7 @@ public class LocalExchange
     // This represents the percentage of maxMemoryPerNode upon which we will stop scaling of writers locally. We have
     // to be conservative here otherwise scaling of writers will happen first before we hit this limit, and then
     // we won't be able to do anything to stop OOM error.
-    public static final double SCALE_WRITERS_MAX_MEMORY_RATIO = 0.5;
+    public static final double SCALE_WRITERS_MAX_MEMORY_RATIO = 0.4;
 
     private final Supplier<LocalExchanger> exchangerSupplier;
 
@@ -154,7 +154,7 @@ public class LocalExchange
                     getSkewedPartitionMinDataProcessedRebalanceThreshold(session).toBytes(),
                     // Further divide the maximum number of possible partition writers based on memory into
                     // the number of available writer threads.
-                    (int) round((double) maxWriterPartitionsBasedOnMemory / bufferCount));
+                    (int) floor((double) maxWriterPartitionsBasedOnMemory / bufferCount));
             LocalExchangeMemoryManager memoryManager = new LocalExchangeMemoryManager(maxBufferedBytes.toBytes());
             sources = IntStream.range(0, bufferCount)
                     .mapToObj(i -> new LocalExchangeSource(memoryManager, source -> checkAllSourcesFinished()))

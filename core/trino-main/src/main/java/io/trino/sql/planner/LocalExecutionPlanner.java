@@ -378,6 +378,7 @@ import static io.trino.sql.tree.SkipTo.Position.LAST;
 import static io.trino.sql.tree.SortItem.Ordering.ASCENDING;
 import static io.trino.sql.tree.SortItem.Ordering.DESCENDING;
 import static io.trino.sql.tree.WindowFrame.Type.ROWS;
+import static io.trino.util.MoreMath.previousPowerOfTwo;
 import static io.trino.util.SpatialJoinUtils.ST_CONTAINS;
 import static io.trino.util.SpatialJoinUtils.ST_DISTANCE;
 import static io.trino.util.SpatialJoinUtils.ST_INTERSECTS;
@@ -3499,28 +3500,30 @@ public class LocalExecutionPlanner
                 return 1;
             }
 
+            int maxWritersBasedOnMemory = getMaxPartitionsPerTaskBasedOnMemory(
+                    (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO));
+
             if (partitioningScheme.isPresent()) {
                 // The default value of partitioned writer count is 32 which is high enough to use it
                 // for both cases when scaling is enabled or not. Additionally, it doesn't lead to too many
                 // small files since when scaling is disabled only single writer will handle a single partition.
+                int partitionedWriterCount = getTaskWriterCount(session);
                 if (isLocalScaledWriterExchange(source)) {
-                    return connectorScalingOptions.perTaskMaxScaledWriterCount()
+                    partitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                             .map(writerCount -> min(writerCount, getTaskPartitionedWriterCount(session)))
                             .orElse(getTaskPartitionedWriterCount(session));
                 }
-                return getTaskPartitionedWriterCount(session);
+                // Consider memory while calculating writer count.
+                return min(partitionedWriterCount, previousPowerOfTwo(maxWritersBasedOnMemory));
             }
 
-            // Consider memory while calculating max writer count for unpartitioned writes.
-            int maxWritersBasedOnMemory = getMaxPartitionsPerTaskBasedOnMemory(
-                    (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO));
             int unPartitionedWriterCount = getTaskWriterCount(session);
             if (isLocalScaledWriterExchange(source)) {
                 unPartitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                         .map(writerCount -> min(writerCount, getTaskScaleWritersMaxWriterCount(session)))
                         .orElse(getTaskScaleWritersMaxWriterCount(session));
             }
-
+            // Consider memory while calculating writer count.
             return min(unPartitionedWriterCount, maxWritersBasedOnMemory);
         }
 

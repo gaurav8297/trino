@@ -299,8 +299,10 @@ public class SkewedPartitionRebalancer
         // initialize partitionDataSizeSinceLastRebalancePerTask
         for (int partition = 0; partition < partitionCount; partition++) {
             int totalAssignedTasks = partitionAssignments.get(partition).size();
+            long partitionSize = partitionDataSize[partition];
             partitionDataSizeSinceLastRebalancePerTask[partition] =
-                    (partitionDataSize[partition] - partitionDataSizeAtLastRebalance[partition]) / totalAssignedTasks;
+                    (partitionSize - partitionDataSizeAtLastRebalance[partition]) / totalAssignedTasks;
+            partitionDataSizeAtLastRebalance[partition] = partitionSize;
         }
 
         // Initialize taskBucketMaxPartitions
@@ -452,10 +454,6 @@ public class SkewedPartitionRebalancer
         }
 
         assignments.add(toTaskBucket);
-
-        // Update the value of partitionDataSizeAtLastRebalance which will get used to calculate
-        // partitionDataSizeSinceLastRebalancePerTask in the next rebalancing cycle.
-        partitionDataSizeAtLastRebalance[partitionId] = partitionDataSize;
 
         int newTaskCount = assignments.size();
         int oldTaskCount = newTaskCount - 1;

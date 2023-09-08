@@ -87,6 +87,7 @@ public final class SystemSessionProperties
     public static final String TASK_SCALE_WRITERS_MAX_WRITER_COUNT = "task_scale_writers_max_writer_count";
     public static final String WRITER_SCALING_MIN_DATA_PROCESSED = "writer_scaling_min_data_processed";
     public static final String SKEWED_PARTITION_MIN_DATA_PROCESSED_REBALANCE_THRESHOLD = "skewed_partition_min_data_processed_rebalance_threshold";
+    public static final String SCALE_WRITERS_MAX_SKEWED_PARTITIONS = "scale_writers_max_skewed_partitions";
     public static final String PUSH_TABLE_WRITE_THROUGH_UNION = "push_table_write_through_union";
     public static final String EXECUTION_POLICY = "execution_policy";
     public static final String DICTIONARY_AGGREGATION = "dictionary_aggregation";
@@ -347,6 +348,11 @@ public final class SystemSessionProperties
                         "Minimum data processed to trigger skewed partition rebalancing in local and remote exchange",
                         DataSize.of(200, MEGABYTE),
                         true),
+                integerProperty(
+                        SCALE_WRITERS_MAX_SKEWED_PARTITIONS,
+                        "Maximum number of skewed partitions that can be scaled in local and remote exchange during partitioned writes",
+                        featuresConfig.getScaleWritersMaxSkewedPartitions(),
+                        false),
                 booleanProperty(
                         PUSH_TABLE_WRITE_THROUGH_UNION,
                         "Parallelize writes when using UNION ALL in queries that write data",
@@ -1177,6 +1183,11 @@ public final class SystemSessionProperties
     public static DataSize getSkewedPartitionMinDataProcessedRebalanceThreshold(Session session)
     {
         return session.getSystemProperty(SKEWED_PARTITION_MIN_DATA_PROCESSED_REBALANCE_THRESHOLD, DataSize.class);
+    }
+
+    public static int getScaleWritersMaxSkewedPartitions(Session session)
+    {
+        return session.getSystemProperty(SCALE_WRITERS_MAX_SKEWED_PARTITIONS, Integer.class);
     }
 
     public static boolean isPushTableWriteThroughUnion(Session session)

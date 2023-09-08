@@ -73,6 +73,7 @@ public class FeaturesConfig
     private boolean redistributeWrites = true;
     private boolean scaleWriters = true;
     private DataSize writerScalingMinDataProcessed = DataSize.of(120, DataSize.Unit.MEGABYTE);
+    private int scaleWritersMaxSkewedPartitions = 30;
     private DataIntegrityVerification exchangeDataIntegrityVerification = DataIntegrityVerification.ABORT;
     /**
      * default value is overwritten for fault tolerant execution in {@link #applyFaultTolerantExecutionDefaults()}}
@@ -166,6 +167,20 @@ public class FeaturesConfig
     public FeaturesConfig setWriterScalingMinDataProcessed(DataSize writerScalingMinDataProcessed)
     {
         this.writerScalingMinDataProcessed = writerScalingMinDataProcessed;
+        return this;
+    }
+
+    @Min(0)
+    public int getScaleWritersMaxSkewedPartitions()
+    {
+        return scaleWritersMaxSkewedPartitions;
+    }
+
+    @Config("scale-writers-max-skewed-partitions")
+    @ConfigDescription("Maximum number of skewed partitions that can be scaled in local and remote exchange during partitioned writes")
+    public FeaturesConfig setScaleWritersMaxSkewedPartitions(int scaleWritersMaxSkewedPartitions)
+    {
+        this.scaleWritersMaxSkewedPartitions = scaleWritersMaxSkewedPartitions;
         return this;
     }
 

@@ -301,6 +301,7 @@ import static io.trino.SystemSessionProperties.getAggregationOperatorUnspillMemo
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageRowCount;
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageSize;
 import static io.trino.SystemSessionProperties.getPagePartitioningBufferPoolSize;
+import static io.trino.SystemSessionProperties.getScaleWritersMaxSkewedPartitions;
 import static io.trino.SystemSessionProperties.getSkewedPartitionMinDataProcessedRebalanceThreshold;
 import static io.trino.SystemSessionProperties.getTaskConcurrency;
 import static io.trino.SystemSessionProperties.getTaskPartitionedWriterCount;
@@ -592,7 +593,8 @@ public class LocalExecutionPlanner
                     taskCount,
                     partitionedWriterCount,
                     (long) (getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes() * scalingMinDataProcessedFactor),
-                    getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes()));
+                    getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes(),
+                    getScaleWritersMaxSkewedPartitions(taskContext.getSession())));
         }
         else {
             partitionFunction = nodePartitioningManager.getPartitionFunction(taskContext.getSession(), partitioningScheme, partitionChannelTypes);

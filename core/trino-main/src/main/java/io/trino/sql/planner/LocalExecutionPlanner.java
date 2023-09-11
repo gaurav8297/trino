@@ -301,6 +301,7 @@ import static io.trino.SystemSessionProperties.getAggregationOperatorUnspillMemo
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageRowCount;
 import static io.trino.SystemSessionProperties.getFilterAndProjectMinOutputPageSize;
 import static io.trino.SystemSessionProperties.getPagePartitioningBufferPoolSize;
+import static io.trino.SystemSessionProperties.getQueryMaxMemoryPerNode;
 import static io.trino.SystemSessionProperties.getScaleWritersMaxSkewedPartitions;
 import static io.trino.SystemSessionProperties.getSkewedPartitionMinDataProcessedRebalanceThreshold;
 import static io.trino.SystemSessionProperties.getTaskConcurrency;
@@ -330,6 +331,7 @@ import static io.trino.operator.TableWriterOperator.TableWriterOperatorFactory;
 import static io.trino.operator.WindowFunctionDefinition.window;
 import static io.trino.operator.WorkProcessorPipelineSourceOperator.toOperatorFactories;
 import static io.trino.operator.aggregation.AccumulatorCompiler.generateAccumulatorFactory;
+import static io.trino.operator.exchange.LocalExchange.SCALE_WRITERS_MAX_MEMORY_RATIO;
 import static io.trino.operator.join.JoinUtils.isBuildSideReplicated;
 import static io.trino.operator.join.NestedLoopBuildOperator.NestedLoopBuildOperatorFactory;
 import static io.trino.operator.join.NestedLoopJoinOperator.NestedLoopJoinOperatorFactory;
@@ -376,12 +378,14 @@ import static io.trino.sql.tree.SkipTo.Position.LAST;
 import static io.trino.sql.tree.SortItem.Ordering.ASCENDING;
 import static io.trino.sql.tree.SortItem.Ordering.DESCENDING;
 import static io.trino.sql.tree.WindowFrame.Type.ROWS;
+import static io.trino.util.MoreMath.previousPowerOfTwo;
 import static io.trino.util.SpatialJoinUtils.ST_CONTAINS;
 import static io.trino.util.SpatialJoinUtils.ST_DISTANCE;
 import static io.trino.util.SpatialJoinUtils.ST_INTERSECTS;
 import static io.trino.util.SpatialJoinUtils.ST_WITHIN;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialComparisons;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialFunctions;
+import static java.lang.Math.ceil;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.toIntExact;
@@ -394,6 +398,8 @@ import static java.util.stream.IntStream.range;
 public class LocalExecutionPlanner
 {
     private static final Logger log = Logger.get(LocalExecutionPlanner.class);
+    // Estimated memory required per writer thread.
+    private static final long MAX_MEMORY_PER_WRITER = DataSize.of(128, DataSize.Unit.MEGABYTE).toBytes();
 
     private final PlannerContext plannerContext;
     private final Metadata metadata;
@@ -3499,24 +3505,35 @@ public class LocalExecutionPlanner
                 return 1;
             }
 
+            int maxWritersBasedOnMemory = getMaxWritersBasedOnMemory(session);
             if (partitioningScheme.isPresent()) {
                 // The default value of partitioned writer count is 32 which is high enough to use it
                 // for both cases when scaling is enabled or not. Additionally, it doesn't lead to too many
                 // small files since when scaling is disabled only single writer will handle a single partition.
+                int partitionedWriterCount = getTaskWriterCount(session);
                 if (isLocalScaledWriterExchange(source)) {
-                    return connectorScalingOptions.perTaskMaxScaledWriterCount()
+                    partitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                             .map(writerCount -> min(writerCount, getTaskPartitionedWriterCount(session)))
                             .orElse(getTaskPartitionedWriterCount(session));
                 }
-                return getTaskPartitionedWriterCount(session);
+                // Consider memory while calculating writer count.
+                return min(partitionedWriterCount, previousPowerOfTwo(maxWritersBasedOnMemory));
             }
 
+            int unPartitionedWriterCount = getTaskWriterCount(session);
             if (isLocalScaledWriterExchange(source)) {
-                return connectorScalingOptions.perTaskMaxScaledWriterCount()
+                unPartitionedWriterCount = connectorScalingOptions.perTaskMaxScaledWriterCount()
                         .map(writerCount -> min(writerCount, getTaskScaleWritersMaxWriterCount(session)))
                         .orElse(getTaskScaleWritersMaxWriterCount(session));
             }
-            return getTaskWriterCount(session);
+            // Consider memory while calculating writer count.
+            return min(unPartitionedWriterCount, maxWritersBasedOnMemory);
+        }
+
+        private int getMaxWritersBasedOnMemory(Session session)
+        {
+            long maxMemoryForWriterTask = (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO);
+            return (int) ceil((double) maxMemoryForWriterTask / MAX_MEMORY_PER_WRITER);
         }
 
         private boolean isSingleGatheringExchange(PlanNode node)
@@ -3660,7 +3677,8 @@ public class LocalExecutionPlanner
                     Optional.empty(),
                     maxLocalExchangeBufferSize,
                     typeOperators,
-                    getWriterScalingMinDataProcessed(session));
+                    getWriterScalingMinDataProcessed(session),
+                    () -> context.getTaskContext().getQueryMemoryReservation().toBytes());
 
             List<Symbol> expectedLayout = node.getInputs().get(0);
             Function<Page, Page> pagePreprocessor = enforceLoadedLayoutProcessor(expectedLayout, source.getLayout());
@@ -3736,7 +3754,8 @@ public class LocalExecutionPlanner
                     hashChannel,
                     maxLocalExchangeBufferSize,
                     typeOperators,
-                    getWriterScalingMinDataProcessed(session));
+                    getWriterScalingMinDataProcessed(session),
+                    () -> context.getTaskContext().getQueryMemoryReservation().toBytes());
             for (int i = 0; i < node.getSources().size(); i++) {
                 DriverFactoryParameters driverFactoryParameters = driverFactoryParametersList.get(i);
                 PhysicalOperation source = driverFactoryParameters.getSource();

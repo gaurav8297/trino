@@ -381,6 +381,7 @@ import static io.trino.util.SpatialJoinUtils.ST_INTERSECTS;
 import static io.trino.util.SpatialJoinUtils.ST_WITHIN;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialComparisons;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialFunctions;
+import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
@@ -580,11 +581,17 @@ public class LocalExecutionPlanner
         int taskCount = getTaskCount(partitioningScheme);
         if (checkCanScalePartitionsRemotely(taskContext.getSession(), taskCount, partitioningScheme.getPartitioning().getHandle(), nodePartitioningManager)) {
             partitionFunction = createPartitionFunction(taskContext.getSession(), nodePartitioningManager, partitioningScheme, partitionChannelTypes);
+            int partitionedWriterCount = getTaskPartitionedWriterCount(taskContext.getSession());
+            // Set the value of minPartitionDataProcessedRebalanceThreshold higher than for local exchange
+            // such that we don't spread partitions across tasks too aggressively. This way we give a partition
+            // an enough time to first scale locally. The value of 0.25 heuristically allows partition to scale
+            // up to 25% of available writers locally before scaling globally.
+            double scalingMinDataProcessedFactor = max(partitionedWriterCount * 0.25, 1);
             skewedPartitionRebalancer = Optional.of(createSkewedPartitionRebalancer(
                     partitionFunction.getPartitionCount(),
                     taskCount,
-                    getTaskPartitionedWriterCount(taskContext.getSession()),
-                    getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes(),
+                    partitionedWriterCount,
+                    (long) (getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes() * scalingMinDataProcessedFactor),
                     getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes()));
         }
         else {

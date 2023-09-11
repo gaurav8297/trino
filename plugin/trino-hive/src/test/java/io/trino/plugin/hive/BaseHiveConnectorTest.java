@@ -123,6 +123,7 @@ import static io.trino.SystemSessionProperties.FAULT_TOLERANT_EXECUTION_HASH_DIS
 import static io.trino.SystemSessionProperties.MAX_WRITER_TASKS_COUNT;
 import static io.trino.SystemSessionProperties.REDISTRIBUTE_WRITES;
 import static io.trino.SystemSessionProperties.SCALE_WRITERS;
+import static io.trino.SystemSessionProperties.TASK_PARTITIONED_WRITER_COUNT;
 import static io.trino.SystemSessionProperties.TASK_SCALE_WRITERS_ENABLED;
 import static io.trino.SystemSessionProperties.TASK_SCALE_WRITERS_MAX_WRITER_COUNT;
 import static io.trino.SystemSessionProperties.TASK_WRITER_COUNT;
@@ -4174,6 +4175,7 @@ public abstract class BaseHiveConnectorTest
                 .setSystemProperty(MAX_WRITER_TASKS_COUNT, Integer.toString(maxWriterTasks))
                 .setSystemProperty(REDISTRIBUTE_WRITES, Boolean.toString(redistributeWrites))
                 .setSystemProperty(TASK_WRITER_COUNT, "1")
+                .setSystemProperty(TASK_PARTITIONED_WRITER_COUNT, "1")
                 .setSystemProperty(WRITER_SCALING_MIN_DATA_PROCESSED, writerScalingMinDataProcessed.toString())
                 .setSystemProperty(TASK_SCALE_WRITERS_ENABLED, "false")
                 .build();

@@ -448,7 +448,7 @@ public class SkewedPartitionRebalancer
 
         // Increment the number of rebalanced partitions.
         numOfRebalancedPartitions.incrementAndGet();
-        log.debug("Rebalanced partition %s to task %s with taskCount %s", partitionId, toTaskBucket.taskId, assignments.size());
+        log.warn("Rebalanced partition %s to task %s with taskCount %s (taskBucket: %s)", partitionId, toTaskBucket.taskId, assignments.size(), taskBucketCount);
         return true;
     }
 

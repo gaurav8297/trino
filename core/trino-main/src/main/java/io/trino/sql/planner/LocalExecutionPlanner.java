@@ -386,7 +386,6 @@ import static io.trino.util.SpatialJoinUtils.ST_WITHIN;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialComparisons;
 import static io.trino.util.SpatialJoinUtils.extractSupportedSpatialFunctions;
 import static java.lang.Math.ceil;
-import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
@@ -588,17 +587,14 @@ public class LocalExecutionPlanner
         int taskCount = getTaskCount(partitioningScheme);
         if (checkCanScalePartitionsRemotely(taskContext.getSession(), taskCount, partitioningScheme.getPartitioning().getHandle(), nodePartitioningManager)) {
             partitionFunction = createPartitionFunction(taskContext.getSession(), nodePartitioningManager, partitioningScheme, partitionChannelTypes);
-            int partitionedWriterCount = getTaskPartitionedWriterCount(taskContext.getSession());
-            // Set the value of minPartitionDataProcessedRebalanceThreshold higher than for local exchange
-            // such that we don't spread partitions across tasks too aggressively. This way we give a partition
-            // an enough time to first scale locally. The value of 0.25 heuristically allows partition to scale
-            // up to 25% of available writers locally before scaling globally.
-            double scalingMinDataProcessedFactor = max(partitionedWriterCount * 0.25, 1);
+            int maxWritersBasedOnMemory = Visitor.getMaxWritersBasedOnMemory(taskContext.getSession());
+            int partitionedWriterCount =
+                    min(getTaskPartitionedWriterCount(taskContext.getSession()), previousPowerOfTwo(maxWritersBasedOnMemory));
             skewedPartitionRebalancer = Optional.of(createSkewedPartitionRebalancer(
                     partitionFunction.getPartitionCount(),
                     taskCount,
                     partitionedWriterCount,
-                    (long) (getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes() * scalingMinDataProcessedFactor),
+                    getWriterScalingMinDataProcessed(taskContext.getSession()).toBytes(),
                     getSkewedPartitionMinDataProcessedRebalanceThreshold(taskContext.getSession()).toBytes(),
                     getScaleWritersMaxSkewedPartitions(taskContext.getSession())));
         }
@@ -3530,7 +3526,7 @@ public class LocalExecutionPlanner
             return min(unPartitionedWriterCount, maxWritersBasedOnMemory);
         }
 
-        private int getMaxWritersBasedOnMemory(Session session)
+        public static int getMaxWritersBasedOnMemory(Session session)
         {
             long maxMemoryForWriterTask = (long) (getQueryMaxMemoryPerNode(session).toBytes() * SCALE_WRITERS_MAX_MEMORY_RATIO);
             return (int) ceil((double) maxMemoryForWriterTask / MAX_MEMORY_PER_WRITER);

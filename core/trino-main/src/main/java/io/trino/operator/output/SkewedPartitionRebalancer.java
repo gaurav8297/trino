@@ -188,6 +188,7 @@ public class SkewedPartitionRebalancer
         this.minPartitionDataProcessedRebalanceThreshold = minPartitionDataProcessedRebalanceThreshold;
         this.minDataProcessedRebalanceThreshold = max(minPartitionDataProcessedRebalanceThreshold, maxDataProcessedRebalanceThreshold);
         this.maxPartitionsToRebalance = maxPartitionsToRebalance;
+        log.warn("maxPartitionsToRebalance is set to %s and taskBucketCount is set to %s", maxPartitionsToRebalance, taskBucketCount);
 
         this.partitionRowCount = new AtomicLongArray(partitionCount);
         this.dataProcessed = new AtomicLong();
@@ -440,7 +441,7 @@ public class SkewedPartitionRebalancer
 
         // Increment the number of rebalanced partitions.
         numOfRebalancedPartitions.incrementAndGet();
-        log.debug("Rebalanced partition %s to task %s with taskCount %s", partitionId, toTaskBucket.taskId, assignments.size());
+        log.warn("[%s] Rebalanced partition %s to task %s with taskCount %s", taskBucketCount, partitionId, toTaskBucket.taskId, assignments.size());
         return true;
     }
 

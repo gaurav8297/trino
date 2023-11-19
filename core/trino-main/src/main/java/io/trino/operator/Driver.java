@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -46,12 +47,15 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.util.concurrent.Futures.withTimeout;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
+import static io.airlift.concurrent.Threads.threadsNamed;
 import static io.trino.operator.Operator.NOT_BLOCKED;
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static java.lang.Boolean.TRUE;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.Executors.newScheduledThreadPool;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 //
@@ -85,6 +89,7 @@ public class Driver
     private final SettableFuture<Void> destroyedFuture = SettableFuture.create();
 
     private final DriverLock exclusiveLock = new DriverLock(state, destroyedFuture);
+    private final ScheduledExecutorService blockedTimeoutExecutor;
 
     @GuardedBy("exclusiveLock")
     private SplitAssignment currentSplitAssignment;
@@ -140,6 +145,9 @@ public class Driver
         SettableFuture<Void> future = SettableFuture.create();
         future.set(null);
         driverBlockedFuture.set(future);
+
+        // Blocked timeout executor is used to timeout blocked operators.
+        blockedTimeoutExecutor = newScheduledThreadPool(1, threadsNamed("driver-timeout-%s"));
     }
 
     // the memory revocation request listeners are added here in a separate initialize() method
@@ -462,6 +470,9 @@ public class Driver
                 for (Operator operator : blockedOperators) {
                     operator.getOperatorContext().recordBlocked(blocked);
                 }
+                if (driverContext.getBlockedTimeout() != null) {
+                    blocked = withTimeout(blocked, driverContext.getBlockedTimeout().toJavaTime(), blockedTimeoutExecutor);
+                }
                 return blocked;
             }
         }
@@ -518,6 +529,7 @@ public class Driver
                 log.error("Driver still has revocable memory reserved after freeing all operator memory. Freeing it.");
             }
             driverContext.finished();
+            blockedTimeoutExecutor.shutdown();
         }
         catch (Throwable t) {
             // this shouldn't happen but be safe

@@ -70,6 +70,7 @@ public class DriverContext
 
     private final AtomicReference<DateTime> executionStartTime = new AtomicReference<>();
     private final AtomicReference<DateTime> executionEndTime = new AtomicReference<>();
+    private final AtomicReference<Duration> blockedTimeout = new AtomicReference<>();
 
     private final MemoryTrackingContext driverMemoryContext;
 
@@ -445,6 +446,16 @@ public class DriverContext
     public ScheduledExecutorService getYieldExecutor()
     {
         return yieldExecutor;
+    }
+
+    public void setBlockedTimeout(Duration duration)
+    {
+        this.blockedTimeout.set(duration);
+    }
+
+    public Duration getBlockedTimeout()
+    {
+        return blockedTimeout.get();
     }
 
     private static long nanosBetween(long start, long end)

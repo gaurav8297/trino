@@ -100,11 +100,12 @@ public abstract class AbstractDeltaLakePageSink
     private final DeltaLakeWriterStats stats;
     private final String trinoVersion;
     private final long targetMaxFileSize;
-
+    private final long idleWriterMinFileSize;
     private long writtenBytes;
     private long memoryUsage;
 
     private final List<Closeable> closedWriterRollbackActions = new ArrayList<>();
+    private final List<Boolean> idleWriters = new ArrayList<>();
     protected final ImmutableList.Builder<DataFileInfo> dataFileInfos = ImmutableList.builder();
     private final DeltaLakeParquetSchemaMapping parquetSchemaMapping;
 
@@ -190,6 +191,7 @@ public abstract class AbstractDeltaLakePageSink
 
         this.trinoVersion = requireNonNull(trinoVersion, "trinoVersion is null");
         this.targetMaxFileSize = DeltaLakeSessionProperties.getTargetMaxFileSize(session);
+        this.idleWriterMinFileSize = DeltaLakeSessionProperties.getIdleWriterMinFileSize(session);
     }
 
     protected abstract void processSynthesizedColumn(DeltaLakeColumnHandle column);
@@ -312,6 +314,7 @@ public abstract class AbstractDeltaLakePageSink
             }
 
             DeltaLakeWriter writer = writers.get(index);
+            verify(writer != null, "Expected writer at index %s", index);
 
             long currentWritten = writer.getWrittenBytes();
             long currentMemory = writer.getMemoryUsage();
@@ -320,6 +323,23 @@ public abstract class AbstractDeltaLakePageSink
 
             writtenBytes += (writer.getWrittenBytes() - currentWritten);
             memoryUsage += (writer.getMemoryUsage() - currentMemory);
+            // Mark this writer as not idle (i.e. active)
+            idleWriters.set(index, false);
+        }
+    }
+
+    @Override
+    public void closeIdleWriters()
+    {
+        for (int writerIndex = 0; writerIndex < writers.size(); writerIndex++) {
+            DeltaLakeWriter writer = writers.get(writerIndex);
+            boolean idleWriter = idleWriters.get(writerIndex);
+            if (!idleWriter || writer == null || writer.getWrittenBytes() <= idleWriterMinFileSize) {
+                idleWriters.set(writerIndex, true);
+                continue;
+            }
+            LOG.warn("Closing writer %s with %s bytes written", writerIndex, writer.getWrittenBytes());
+            closeWriter(writerIndex);
         }
     }
 
@@ -334,6 +354,7 @@ public abstract class AbstractDeltaLakePageSink
         // expand writers list to new size
         while (writers.size() <= pageIndexer.getMaxIndex()) {
             writers.add(null);
+            idleWriters.add(true);
         }
         // create missing writers
         for (int position = 0; position < page.getPositionCount(); position++) {
@@ -374,7 +395,6 @@ public abstract class AbstractDeltaLakePageSink
             memoryUsage += writer.getMemoryUsage();
         }
         verify(writers.size() == pageIndexer.getMaxIndex() + 1);
-        verify(!writers.contains(null));
 
         return writerIndexes;
     }
@@ -387,6 +407,9 @@ public abstract class AbstractDeltaLakePageSink
     protected void closeWriter(int writerIndex)
     {
         DeltaLakeWriter writer = writers.get(writerIndex);
+        if (writer == null) {
+            return;
+        }
 
         long currentWritten = writer.getWrittenBytes();
         long currentMemory = writer.getMemoryUsage();

@@ -302,6 +302,7 @@ public abstract class AbstractOperatorBenchmark
                 new TestingGcMonitor(),
                 localQueryRunner.getExecutor(),
                 localQueryRunner.getScheduler(),
+                localQueryRunner.getScheduler(),
                 DataSize.of(256, MEGABYTE),
                 spillSpaceTracker)
                 .addTaskContext(new TaskStateMachine(new TaskId(new StageId("query", 0), 0, 0), localQueryRunner.getExecutor()),

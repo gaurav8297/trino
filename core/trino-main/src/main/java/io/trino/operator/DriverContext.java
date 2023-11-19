@@ -54,6 +54,7 @@ public class DriverContext
     private final PipelineContext pipelineContext;
     private final Executor notificationExecutor;
     private final ScheduledExecutorService yieldExecutor;
+    private final ScheduledExecutorService timeoutExecutor;
 
     private final AtomicBoolean finished = new AtomicBoolean();
 
@@ -70,6 +71,7 @@ public class DriverContext
 
     private final AtomicReference<DateTime> executionStartTime = new AtomicReference<>();
     private final AtomicReference<DateTime> executionEndTime = new AtomicReference<>();
+    private final AtomicReference<Duration> blockedTimeout = new AtomicReference<>();
 
     private final MemoryTrackingContext driverMemoryContext;
 
@@ -82,12 +84,14 @@ public class DriverContext
             PipelineContext pipelineContext,
             Executor notificationExecutor,
             ScheduledExecutorService yieldExecutor,
+            ScheduledExecutorService timeoutExecutor,
             MemoryTrackingContext driverMemoryContext,
             long splitWeight)
     {
         this.pipelineContext = requireNonNull(pipelineContext, "pipelineContext is null");
         this.notificationExecutor = requireNonNull(notificationExecutor, "notificationExecutor is null");
         this.yieldExecutor = requireNonNull(yieldExecutor, "yieldExecutor is null");
+        this.timeoutExecutor = requireNonNull(timeoutExecutor, "timeoutExecutor is null");
         this.driverMemoryContext = requireNonNull(driverMemoryContext, "driverMemoryContext is null");
         this.yieldSignal = new DriverYieldSignal();
         this.splitWeight = splitWeight;
@@ -445,6 +449,21 @@ public class DriverContext
     public ScheduledExecutorService getYieldExecutor()
     {
         return yieldExecutor;
+    }
+
+    public ScheduledExecutorService getTimeoutExecutor()
+    {
+        return timeoutExecutor;
+    }
+
+    public void setBlockedTimeout(Duration duration)
+    {
+        this.blockedTimeout.set(duration);
+    }
+
+    public Duration getBlockedTimeout()
+    {
+        return blockedTimeout.get();
     }
 
     private static long nanosBetween(long start, long end)

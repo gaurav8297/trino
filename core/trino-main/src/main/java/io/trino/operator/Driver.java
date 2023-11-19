@@ -46,6 +46,8 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.util.concurrent.Futures.nonCancellationPropagating;
+import static com.google.common.util.concurrent.Futures.withTimeout;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.trino.operator.Operator.NOT_BLOCKED;
@@ -455,6 +457,9 @@ public class Driver
 
                 // unblock when the first future is complete
                 ListenableFuture<Void> blocked = firstFinishedFuture(blockedFutures);
+                if (driverContext.getBlockedTimeout() != null) {
+                    blocked = withTimeout(nonCancellationPropagating(blocked), driverContext.getBlockedTimeout().toJavaTime(), driverContext.getTimeoutExecutor());
+                }
                 // driver records serial blocked time
                 driverContext.recordBlocked(blocked);
                 // each blocked operator is responsible for blocking the execution

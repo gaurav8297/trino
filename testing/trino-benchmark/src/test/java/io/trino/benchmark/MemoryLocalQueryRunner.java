@@ -75,6 +75,7 @@ public class MemoryLocalQueryRunner
                     new TestingGcMonitor(),
                     localQueryRunner.getExecutor(),
                     localQueryRunner.getScheduler(),
+                    localQueryRunner.getScheduler(),
                     DataSize.of(4, GIGABYTE),
                     spillSpaceTracker);
 

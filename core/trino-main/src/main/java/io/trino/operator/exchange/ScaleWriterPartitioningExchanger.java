@@ -44,6 +44,7 @@ public class ScaleWriterPartitioningExchanger
     private final int[] partitionWriterIndexes;
     private final Supplier<Long> totalMemoryUsed;
     private final long maxMemoryPerNode;
+    private long dataProcessed;
 
     public ScaleWriterPartitioningExchanger(
             List<Consumer<Page>> buffers,
@@ -83,11 +84,28 @@ public class ScaleWriterPartitioningExchanger
     @Override
     public void accept(Page page)
     {
+        // Only update the scaling state if the memory used is below the 60% limit. Otherwise, if we keep updating
+        // the scaling state and the memory used is fluctuating around the limit, then we could do massive scaling
+        // in a single rebalancing cycle which could cause OOM error.
+        if (totalMemoryUsed.get() < maxMemoryPerNode * 0.6) {
+            for (int partitionId = 0; partitionId < partitionRowCounts.length; partitionId++) {
+                partitionRebalancer.addPartitionRowCount(partitionId, partitionRowCounts[partitionId]);
+            }
+            partitionRebalancer.addDataProcessed(dataProcessed);
+        }
+
+        // Reset the value of partition row count, writer ids and data processed for this page
+        dataProcessed = 0;
+        for (int partitionId = 0; partitionId < partitionRowCounts.length; partitionId++) {
+            partitionRowCounts[partitionId] = 0;
+            partitionWriterIds[partitionId] = -1;
+        }
+
         // Scale up writers when current buffer memory utilization is more than 50% of the maximum.
-        // Do not scale up if total memory used is greater than 50% of max memory per node.
+        // Do not scale up if total memory used is greater than 60% of max memory per node.
         // We have to be conservative here otherwise scaling of writers will happen first
         // before we hit this limit, and then we won't be able to do anything to stop OOM error.
-        if (memoryManager.getBufferedBytes() > maxBufferedBytes * 0.5 && totalMemoryUsed.get() < maxMemoryPerNode * 0.5) {
+        if (memoryManager.getBufferedBytes() > maxBufferedBytes * 0.5 && totalMemoryUsed.get() < maxMemoryPerNode * 0.6) {
             partitionRebalancer.rebalance();
         }
 
@@ -109,13 +127,6 @@ public class ScaleWriterPartitioningExchanger
                 partitionWriterIds[partitionId] = writerId;
             }
             writerAssignments[writerId].add(position);
-        }
-
-        for (int partitionId = 0; partitionId < partitionRowCounts.length; partitionId++) {
-            partitionRebalancer.addPartitionRowCount(partitionId, partitionRowCounts[partitionId]);
-            // Reset the value of partition row count
-            partitionRowCounts[partitionId] = 0;
-            partitionWriterIds[partitionId] = -1;
         }
 
         // build a page for each writer
@@ -158,8 +169,8 @@ public class ScaleWriterPartitioningExchanger
     private void sendPageToPartition(Consumer<Page> buffer, Page pageSplit)
     {
         long retainedSizeInBytes = pageSplit.getRetainedSizeInBytes();
-        partitionRebalancer.addDataProcessed(retainedSizeInBytes);
         memoryManager.updateMemoryUsage(retainedSizeInBytes);
+        dataProcessed += retainedSizeInBytes;
         buffer.accept(pageSplit);
     }
 }

@@ -257,8 +257,13 @@ public class SkewedPartitionRebalancer
         for (int partition = 0; partition < partitionCount; partition++) {
             int totalAssignedTasks = partitionAssignments.get(partition).size();
             long dataSize = partitionDataSize[partition];
+            // Since we estimate the partitionDataSize based on partitionRowCount and total data processed. It is possible
+            // that the estimated partitionDataSize is slightly less than it was estimated at the last rebalance cycle.
+            // That's because for a given partition, row count hasn't increased, however overall data processed
+            // has increased. Therefore, we need to make sure that the estimated partitionDataSize since last rebalance
+            // is always greater than 0. Otherwise, it will affect the ordering of minTaskBuckets priority queue.
             partitionDataSizeSinceLastRebalancePerTask[partition] =
-                    (dataSize - partitionDataSizeAtLastRebalance[partition]) / totalAssignedTasks;
+                    max((dataSize - partitionDataSizeAtLastRebalance[partition]) / totalAssignedTasks, 0);
             partitionDataSizeAtLastRebalance[partition] = dataSize;
         }
 

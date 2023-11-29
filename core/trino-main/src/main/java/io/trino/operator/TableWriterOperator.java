@@ -70,6 +70,7 @@ public class TableWriterOperator
         implements Operator
 {
     private static final Logger LOG = Logger.get(TableWriterOperator.class);
+//    private static final Duration CLOSE_IDLE_WRITERS_TRIGGER_DURATION = new Duration(100, MILLISECONDS);
     public static final int ROW_COUNT_CHANNEL = 0;
     public static final int FRAGMENT_CHANNEL = 1;
     public static final int STATS_START_CHANNEL = 2;
@@ -271,6 +272,10 @@ public class TableWriterOperator
     {
         requireNonNull(page, "page is null");
         checkState(needsInput(), "Operator does not need input");
+        if (page.getPositionCount() == 0) {
+            tryClosingIdleWriters();
+            return;
+        }
 
         OperationTimer timer = new OperationTimer(statisticsCpuTimerEnabled);
         statisticAggregationOperator.addInput(page);
@@ -285,6 +290,7 @@ public class TableWriterOperator
         blocked = asVoid(allAsList(blockedOnAggregation, blockedOnWrite));
         rowCount += page.getPositionCount();
         updateWrittenBytes();
+        tryClosingIdleWriters();
         newPagesAppended = true;
         operatorContext.recordWriterInputDataSize(page.getSizeInBytes());
     }
@@ -293,7 +299,7 @@ public class TableWriterOperator
     public Page getOutput()
     {
         long start = System.currentTimeMillis();
-        tryClosingIdleWriters();
+//        tryClosingIdleWriters();
         if (!newPagesAppended && state != State.FINISHING) {
             closeCallTime++;
             totalTime += System.currentTimeMillis() - start;

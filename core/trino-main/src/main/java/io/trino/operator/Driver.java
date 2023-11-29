@@ -405,7 +405,7 @@ public class Driver
                 current.getOperatorContext().recordGetOutput(operationTimer, page);
 
                 // if we got an output page, add it to the next operator
-                if (page != null && page.getPositionCount() != 0) {
+                if (page != null) {
                     next.addInput(page);
                     next.getOperatorContext().recordAddInput(operationTimer, page);
                     movedPage = true;

@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
@@ -55,6 +56,7 @@ import static com.google.common.util.concurrent.Futures.allAsList;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.airlift.concurrent.MoreFutures.toListenableFuture;
+import static io.trino.SystemSessionProperties.getCloseIdleWritersTriggerDuration;
 import static io.trino.SystemSessionProperties.getIdleWriterMinDataSizeThreshold;
 import static io.trino.SystemSessionProperties.isStatisticsCpuTimerEnabled;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -67,7 +69,7 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 public class TableWriterOperator
         implements Operator
 {
-//    private static final Duration CLOSE_IDLE_WRITERS_TRIGGER_DURATION = new Duration(32, SECONDS);
+    private static final Logger LOG = Logger.get(TableWriterOperator.class);
     public static final int ROW_COUNT_CHANNEL = 0;
     public static final int FRAGMENT_CHANNEL = 1;
     public static final int STATS_START_CHANNEL = 2;
@@ -117,7 +119,9 @@ public class TableWriterOperator
             checkState(!closed, "Factory is already closed");
             // Driver should call getOutput() periodically on TableWriterOperator to close idle writers which will essentially
             // decrease the memory usage even if no pages were added to that writer thread.
-            // driverContext.setBlockedTimeout(CLOSE_IDLE_WRITERS_TRIGGER_DURATION);
+            if (getCloseIdleWritersTriggerDuration(session).toMillis() > 0) {
+                driverContext.setBlockedTimeout(getCloseIdleWritersTriggerDuration(session));
+            }
             OperatorContext context = driverContext.addOperatorContext(operatorId, planNodeId, TableWriterOperator.class.getSimpleName());
             Operator statisticsAggregationOperator = statisticsAggregationOperatorFactory.createOperator(driverContext);
             boolean statisticsCpuTimerEnabled = !(statisticsAggregationOperator instanceof DevNullOperator) && isStatisticsCpuTimerEnabled(session);
@@ -188,6 +192,9 @@ public class TableWriterOperator
 
     private final Supplier<TableWriterInfo> tableWriterInfoSupplier;
     private long lastPhysicalWrittenDataSize;
+    private long closeCallTime;
+    private long totalTime;
+    private boolean newPagesAppended;
 
     public TableWriterOperator(
             OperatorContext operatorContext,
@@ -224,6 +231,8 @@ public class TableWriterOperator
         OperationTimer timer = new OperationTimer(statisticsCpuTimerEnabled);
         statisticAggregationOperator.finish();
         timer.end(statisticsTiming);
+        LOG.warn("Close writer count: %s", closeCallTime);
+        LOG.warn("Total getOutput time: %s millis", totalTime);
 
         ListenableFuture<Void> blockedOnAggregation = statisticAggregationOperator.isBlocked();
         ListenableFuture<?> blockedOnFinish = NOT_BLOCKED;
@@ -262,10 +271,6 @@ public class TableWriterOperator
     {
         requireNonNull(page, "page is null");
         checkState(needsInput(), "Operator does not need input");
-        if (page.getPositionCount() == 0) {
-            tryClosingIdleWriters();
-            return;
-        }
 
         OperationTimer timer = new OperationTimer(statisticsCpuTimerEnabled);
         statisticAggregationOperator.addInput(page);
@@ -280,15 +285,25 @@ public class TableWriterOperator
         blocked = asVoid(allAsList(blockedOnAggregation, blockedOnWrite));
         rowCount += page.getPositionCount();
         updateWrittenBytes();
-        tryClosingIdleWriters();
+        newPagesAppended = true;
         operatorContext.recordWriterInputDataSize(page.getSizeInBytes());
     }
 
     @Override
     public Page getOutput()
     {
-//        tryClosingIdleWriters();
+        long start = System.currentTimeMillis();
+        tryClosingIdleWriters();
+        if (!newPagesAppended && state != State.FINISHING) {
+            closeCallTime++;
+            totalTime += System.currentTimeMillis() - start;
+            return null;
+        }
+        newPagesAppended = false;
+
         if (!blocked.isDone()) {
+            closeCallTime++;
+            totalTime += System.currentTimeMillis() - start;
             return null;
         }
 
@@ -298,12 +313,18 @@ public class TableWriterOperator
             timer.end(statisticsTiming);
 
             if (aggregationOutput == null) {
+                closeCallTime++;
+                totalTime += System.currentTimeMillis() - start;
                 return null;
             }
+            closeCallTime++;
+            totalTime += System.currentTimeMillis() - start;
             return createStatisticsPage(aggregationOutput);
         }
 
         if (state != State.FINISHING) {
+            closeCallTime++;
+            totalTime += System.currentTimeMillis() - start;
             return null;
         }
 
@@ -320,7 +341,10 @@ public class TableWriterOperator
         }
 
         state = State.FINISHED;
-        return new Page(positionCount, outputBlocks);
+        Page ret = new Page(positionCount, outputBlocks);
+        closeCallTime++;
+        totalTime += System.currentTimeMillis() - start;
+        return ret;
     }
 
     private Page createStatisticsPage(Page aggregationOutput)

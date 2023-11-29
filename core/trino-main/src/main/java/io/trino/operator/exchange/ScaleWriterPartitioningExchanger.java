@@ -134,7 +134,6 @@ public class ScaleWriterPartitioningExchanger
             IntArrayList positionsList = writerAssignments[bucket];
             int bucketSize = positionsList.size();
             if (bucketSize == 0) {
-                buffers.get(bucket).accept(new Page(0));
                 continue;
             }
             // clear the assigned positions list size for the next iteration to start empty. This

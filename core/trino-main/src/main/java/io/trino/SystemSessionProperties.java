@@ -53,6 +53,7 @@ import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.TimeZoneKey.getTimeZoneKey;
 import static java.lang.Math.min;
 import static java.lang.String.format;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public final class SystemSessionProperties
         implements SystemSessionPropertiesProvider
@@ -208,6 +209,7 @@ public final class SystemSessionProperties
     public static final String FORCE_SPILLING_JOIN = "force_spilling_join";
     public static final String PAGE_PARTITIONING_BUFFER_POOL_SIZE = "page_partitioning_buffer_pool_size";
     public static final String IDLE_WRITER_MIN_DATA_SIZE_THRESHOLD = "idle_writer_min_data_size_threshold";
+    public static final String CLOSE_IDLE_WRITERS_TRIGGER_DURATION = "close_idle_writers_trigger_duration";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -1063,6 +1065,10 @@ public final class SystemSessionProperties
                 dataSizeProperty(IDLE_WRITER_MIN_DATA_SIZE_THRESHOLD,
                         "Minimum amount of data written by a writer thread on average before it tries to close the idle writers.",
                         DataSize.of(256, MEGABYTE),
+                        true),
+                durationProperty(CLOSE_IDLE_WRITERS_TRIGGER_DURATION,
+                        "Minimum amount of data written by a writer thread on average before it tries to close the idle writers.",
+                        new Duration(10, SECONDS),
                         true));
     }
 
@@ -1905,5 +1911,10 @@ public final class SystemSessionProperties
     public static DataSize getIdleWriterMinDataSizeThreshold(Session session)
     {
         return session.getSystemProperty(IDLE_WRITER_MIN_DATA_SIZE_THRESHOLD, DataSize.class);
+    }
+
+    public static Duration getCloseIdleWritersTriggerDuration(Session session)
+    {
+        return session.getSystemProperty(CLOSE_IDLE_WRITERS_TRIGGER_DURATION, Duration.class);
     }
 }

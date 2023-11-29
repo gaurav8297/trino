@@ -47,6 +47,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.util.concurrent.Futures.nonCancellationPropagating;
 import static com.google.common.util.concurrent.Futures.withTimeout;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
@@ -147,7 +148,7 @@ public class Driver
         driverBlockedFuture.set(future);
 
         // Blocked timeout executor is used to timeout blocked operators.
-        blockedTimeoutExecutor = newScheduledThreadPool(1, threadsNamed("driver-timeout-%s"));
+        blockedTimeoutExecutor = newScheduledThreadPool(2, threadsNamed("driver-timeout-%s"));
     }
 
     // the memory revocation request listeners are added here in a separate initialize() method
@@ -463,15 +464,15 @@ public class Driver
 
                 // unblock when the first future is complete
                 ListenableFuture<Void> blocked = firstFinishedFuture(blockedFutures);
+                if (driverContext.getBlockedTimeout() != null) {
+                    blocked = withTimeout(nonCancellationPropagating(blocked), driverContext.getBlockedTimeout().toJavaTime(), blockedTimeoutExecutor);
+                }
                 // driver records serial blocked time
                 driverContext.recordBlocked(blocked);
                 // each blocked operator is responsible for blocking the execution
                 // until one of the operators can continue
                 for (Operator operator : blockedOperators) {
                     operator.getOperatorContext().recordBlocked(blocked);
-                }
-                if (driverContext.getBlockedTimeout() != null) {
-                    blocked = withTimeout(blocked, driverContext.getBlockedTimeout().toJavaTime(), blockedTimeoutExecutor);
                 }
                 return blocked;
             }

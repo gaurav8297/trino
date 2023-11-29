@@ -369,7 +369,7 @@ public class HivePageSink
                 idleWriters.set(writerIndex, true);
                 continue;
             }
-            LOG.warn("Closing writer %s with %s bytes written", writerIndex, writer.getWrittenBytes());
+            LOG.warn("[%s] Closing writer %s with %s bytes written", Thread.currentThread().getId(), writerIndex, writer.getWrittenBytes());
             closeWriter(writerIndex);
         }
     }

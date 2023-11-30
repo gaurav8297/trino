@@ -15,6 +15,7 @@
 package io.trino.operator.exchange;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import io.airlift.log.Logger;
 import io.trino.operator.PartitionFunction;
 import io.trino.operator.output.SkewedPartitionRebalancer;
 import io.trino.spi.Page;
@@ -31,6 +32,7 @@ import static java.util.Objects.requireNonNull;
 public class ScaleWriterPartitioningExchanger
         implements LocalExchanger
 {
+    private static final Logger log = Logger.get(SkewedPartitionRebalancer.class);
     private final List<Consumer<Page>> buffers;
     private final LocalExchangeMemoryManager memoryManager;
     private final long maxBufferedBytes;
@@ -93,6 +95,7 @@ public class ScaleWriterPartitioningExchanger
             }
             partitionRebalancer.addDataProcessed(dataProcessed);
         }
+        log.warn("Page size in ScaleWriterPartitioningExchanger %s", page.getSizeInBytes());
 
         // Reset the value of partition row count, writer ids and data processed for this page
         dataProcessed = 0;

@@ -99,7 +99,7 @@ public class TaskManagerConfig
     private int httpTimeoutThreads = 3;
 
     private int taskNotificationThreads = 5;
-    private int taskYieldThreads = 3;
+    private int taskYieldThreads = 7;
 
     private BigDecimal levelTimeMultiplier = new BigDecimal(2.0);
 

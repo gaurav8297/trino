@@ -1079,6 +1079,27 @@ public class EventDrivenFaultTolerantQueryScheduler
         {
             // Re-optimize plan here based on available runtime statistics.
             // Fragments changed due to re-optimization as well as their downstream stages are expected to be assigned new fragment ids.
+            // TODO - remove
+            for (SubPlan subPlan : planInTopologicalOrder) {
+                PlanFragment fragment = subPlan.getFragment();
+                StageId stageId = getStageId(fragment.getId());
+                StageExecution stageExecution = stageExecutions.get(stageId);
+                if (stageExecution == null) {
+                    continue;
+                }
+                Optional<OutputStatsEstimateResult> outputStats = stageExecution.getOutputStats(stageExecutions::get, false);
+
+                if (outputStats.isPresent() && outputStats.get().kind().equals("FINISHED")) {
+                    OutputDataSizeEstimate outputDataSizeEstimate = outputStats.get().outputDataSizeEstimate();
+                    ImmutableLongArray partitionDataSizes = outputDataSizeEstimate.getPartitionDataSizes();
+                    for (int i = 0; i < partitionDataSizes.length(); i++) {
+                        log.warn("Partition %s has estimated size of %s", i, partitionDataSizes.get(i));
+                    }
+                    log.warn("Total estimated size: %s", outputDataSizeEstimate.getTotalSizeInBytes());
+                    log.warn("Total estimated rows: %s", outputStats.get().outputRowCountEstimate());
+                }
+            }
+
             plan = updateStagesPartitioning(plan);
             return plan;
         }

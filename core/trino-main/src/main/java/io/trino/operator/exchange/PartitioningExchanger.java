@@ -15,6 +15,7 @@ package io.trino.operator.exchange;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ListenableFuture;
+import io.airlift.log.Logger;
 import io.trino.annotation.NotThreadSafe;
 import io.trino.operator.PartitionFunction;
 import io.trino.spi.Page;
@@ -30,11 +31,13 @@ import static java.util.Objects.requireNonNull;
 class PartitioningExchanger
         implements LocalExchanger
 {
+    private static final Logger Log = Logger.get(PartitioningExchanger.class);
     private final List<Consumer<Page>> buffers;
     private final LocalExchangeMemoryManager memoryManager;
     private final Function<Page, Page> partitionedPagePreparer;
     private final PartitionFunction partitionFunction;
     private final IntArrayList[] partitionAssignments;
+    private final int[] partitionSizes;
 
     public PartitioningExchanger(
             List<Consumer<Page>> partitions,
@@ -48,8 +51,10 @@ class PartitioningExchanger
         this.partitionFunction = requireNonNull(partitionFunction, "partitionFunction is null");
 
         partitionAssignments = new IntArrayList[partitions.size()];
+        partitionSizes = new int[partitions.size()];
         for (int i = 0; i < partitionAssignments.length; i++) {
             partitionAssignments[i] = new IntArrayList();
+            partitionSizes[i] = 0;
         }
     }
 
@@ -75,6 +80,7 @@ class PartitioningExchanger
             // will store new values, but does not modify the positions array
             int[] positions = positionsList.elements();
             positionsList.clear();
+            partitionSizes[partition] += partitionSize;
 
             Page pageSplit;
             if (partitionSize == page.getPositionCount()) {
@@ -89,6 +95,11 @@ class PartitioningExchanger
             memoryManager.updateMemoryUsage(pageSplit.getRetainedSizeInBytes());
             buffers.get(partition).accept(pageSplit);
         }
+        Log.warn("====================================================================");
+        for (int partition = 0; partition < partitionSizes.length; partition++) {
+            Log.warn("Partition %s has %s rows", partition, partitionSizes[partition]);
+        }
+        Log.warn("====================================================================");
     }
 
     @Override

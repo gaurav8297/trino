@@ -29,6 +29,11 @@ public class OutputDataSizeEstimate
         this.partitionDataSizes = requireNonNull(partitionDataSizes, "partitionDataSizes is null");
     }
 
+    public ImmutableLongArray getPartitionDataSizes()
+    {
+        return partitionDataSizes;
+    }
+
     public long getPartitionSizeInBytes(int partitionId)
     {
         return partitionDataSizes.get(partitionId);
